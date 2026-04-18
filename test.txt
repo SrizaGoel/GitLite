@@ -1,0 +1,13 @@
+GitLite Test File
+
+This is version one of the file.
+It contains multiple lines.
+We are testing commit functionality.
+
+Line 5: Initial content modified.
+Line 6: Added a new idea here.
+Line 7: Testing diff algorithms.
+
+End of file.
+HAHHA
+    
