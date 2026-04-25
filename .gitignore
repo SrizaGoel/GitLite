@@ -2,7 +2,6 @@ node_modules/
 .next/
 *.o
 *.exe
-.gitlite/
 .env
 api/node_modules/
 gitlite_ui/node_modules/

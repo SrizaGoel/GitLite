@@ -1,0 +1,6 @@
+type FULL
+ENTRY 3107e46aa7229f696bc97abeda5be49ff69907cc FULL NONE
+DATA_BEGIN
+type FULL
+hello
+this is trial for branching and main
