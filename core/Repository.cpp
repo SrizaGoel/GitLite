@@ -8,6 +8,10 @@ namespace fs = filesystem;
 
 Repository::Repository()
 {
+    if (!fs::exists(".gitlite"))
+    {
+        init();
+    }
     index.load();
 }
 
