@@ -53,12 +53,9 @@ int main(int argc,char* argv[])
     }
     else if(cmd=="branch")
     {
-        if(argc<3)
-        {
-            cout<<"Usage: gitlite branch <name>\n";
-            return 0;
-        }
-        repo.branch(argv[2]);
+        string bname = argv[2];
+        string cid = (argc > 3) ? argv[3] : "";
+        repo.branch(bname, cid);
     }
 
     else if(cmd=="checkout")

@@ -43,7 +43,7 @@ public:
     void commit(const string &message);
     void log();
     void diff(const string &file1, const string &file2);
-    void branch(const string &name);
+    void branch(const string &name, const string &commitID = "");
     void checkout(const string &target); 
     void search(const string &keyword);
     void stats(const string &file1, const string &file2);

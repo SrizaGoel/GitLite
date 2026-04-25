@@ -299,10 +299,10 @@ void Repository::checkout(const string &target)
     }
 }
 
-void Repository::branch(const string &name)
+void Repository::branch(const string &name, const string &commitID)
 {
-    string headCommit = branchManager.getHeadCommit();
-    branchManager.createBranch(name, headCommit);
+    string target = commitID.empty() ? branchManager.getHeadCommit() : commitID;
+    branchManager.createBranch(name, target);
 }
 
 void Repository::branches()
