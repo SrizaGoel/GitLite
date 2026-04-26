@@ -170,6 +170,75 @@ app.get("/file-history", (req, res) => {
     res.json(fileHistory);
 });
 
+app.get("/file-versions", (req, res) => {
+    const fileName = req.query.file;
+    if (!fileName) return res.status(400).send("File name is required.");
+    
+    const fs = require("fs");
+    const commitsDir = path.join(__dirname, "..", ".gitlite", "commits");
+    const objectsDir = path.join(__dirname, "..", ".gitlite", "objects");
+    let commits = [];
+
+    if (!fs.existsSync(commitsDir)) return res.json([]);
+
+    const dirs = fs.readdirSync(commitsDir);
+    for (const dir of dirs) {
+        const dirPath = path.join(commitsDir, dir);
+        if (!fs.statSync(dirPath).isDirectory()) continue;
+
+        const files = fs.readdirSync(dirPath);
+        for (const file of files) {
+            const content = fs.readFileSync(path.join(dirPath, file), "utf-8");
+            const lines = content.split(/\r?\n/);
+            let id, timestamp;
+            let blobHash = null;
+            let inTree = false;
+
+            for (let line of lines) {
+                line = line.trim();
+                if (line.startsWith("id ")) id = line.split(" ")[1];
+                else if (line.startsWith("timestamp ")) timestamp = line.substring(10);
+                else if (line === "tree") inTree = true;
+                else if (inTree && line) {
+                    const parts = line.split(" ");
+                    if (parts[0] === fileName) blobHash = parts[1];
+                }
+            }
+            if (id && blobHash) {
+                commits.push({ id, timestamp, blobHash });
+            }
+        }
+    }
+
+    commits.sort((a, b) => new Date(b.timestamp.replace(" ", "T")) - new Date(a.timestamp.replace(" ", "T")));
+
+    const versions = [];
+    const seenHashes = new Set();
+    
+    for (const c of commits) {
+        if (versions.length >= 4) break;
+        if (seenHashes.has(c.blobHash)) continue; // skip identical versions
+        seenHashes.add(c.blobHash);
+        
+        // Fix path: objects/XX/XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+        const dirPart = c.blobHash.substring(0, 2);
+        const filePart = c.blobHash.substring(2);
+        const blobPath = path.join(objectsDir, dirPart, filePart);
+        
+        if (fs.existsSync(blobPath)) {
+            let content = fs.readFileSync(blobPath, "utf-8");
+            if (content.startsWith("type FULL")) {
+                content = content.replace(/^type FULL\r?\n/, "");
+            } else if (content.startsWith("type DELTA")) {
+                content = content.replace(/^type DELTA\r?\n/, "");
+            }
+            versions.push(content);
+        }
+    }
+
+    res.json(versions.reverse()); // return oldest first so v1 is oldest
+});
+
 app.get("/commit-graph", (req, res) => {
     const fs = require("fs");
     const graphPath = path.join(__dirname, "..", ".gitlite", "commit_graph");
@@ -200,6 +269,7 @@ app.get("/commit-graph", (req, res) => {
         let message = "No message";
         let timestamp = "Unknown";
         let files = [];
+        let treeEntries = [];
         
         const ab = id.substr(0, 2);
         const rest = id.substr(2);
@@ -215,7 +285,11 @@ app.get("/commit-graph", (req, res) => {
                 if (cline.startsWith("timestamp ")) timestamp = cline.substring(10);
                 if (cline === "tree") inTree = true;
                 else if (inTree && cline) {
-                    files.push(cline.split(" ")[0]);
+                    const parts = cline.split(" ");
+                    files.push(parts[0]);
+                    if (parts.length > 1) {
+                        treeEntries.push({ name: parts[0], hash: parts[1] });
+                    }
                 }
             }
         }
@@ -226,6 +300,7 @@ app.get("/commit-graph", (req, res) => {
             message,
             timestamp,
             files,
+            treeEntries,
             branches: branchMap[id] || []
         });
     }
@@ -303,6 +378,30 @@ app.get("/diff-commit", (req, res) => {
     execFile(path.join(repoPath, "gitlite.exe"), ["diff-commit", commitID, filename], { cwd: repoPath }, (error, stdout, stderr) => {
         if (error) return res.status(500).send(stderr || stdout);
         res.send(stdout);
+    });
+});
+
+app.get("/file-content-at-commit", (req, res) => {
+    const { commitID, filename } = req.query;
+    if (!commitID || !filename) return res.status(400).send("Commit ID and Filename required");
+
+    execFile(path.join(repoPath, "gitlite.exe"), ["cat-file", commitID, filename], { cwd: repoPath }, (error, stdout, stderr) => {
+        if (error) return res.status(500).send(stderr || stdout);
+        let content = stdout;
+        // Strip out GitLite internal headers if present
+        if (content.startsWith("type FULL")) {
+            content = content.replace(/^type FULL\r?\n/, "");
+        } else if (content.startsWith("ENTRY")) {
+            const dataBeginIdx = content.indexOf("DATA_BEGIN");
+            if (dataBeginIdx !== -1) {
+                content = content.substring(content.indexOf("\n", dataBeginIdx) + 1);
+            }
+            const dataEndIdx = content.lastIndexOf("DATA_END");
+            if (dataEndIdx !== -1) {
+                content = content.substring(0, dataEndIdx).trimEnd();
+            }
+        }
+        res.send(content);
     });
 });
 

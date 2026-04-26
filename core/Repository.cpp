@@ -355,3 +355,14 @@ void Repository::graph()
 {
     commitGraph.printHistory(branchManager.getHeadCommit());
 }
+
+void Repository::catFile(const string &commitID, const string &filename)
+{
+    if (!objectStore.commitExists(commitID)) return;
+    Commit c = objectStore.loadCommit(commitID);
+    auto it = c.fileTree.find(filename);
+    if (it == c.fileTree.end()) return;
+    string hash = it->second;
+    string content = objectStore.loadObject(hash);
+    cout << content;
+}

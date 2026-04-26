@@ -114,6 +114,15 @@ int main(int argc,char* argv[])
         }
         repo.diffWithCommit(argv[2], argv[3]);
     }
+    else if(cmd=="cat-file")
+    {
+        if(argc<4)
+        {
+            cout<<"Usage: gitlite cat-file <commitID> <filename>\n";
+            return 0;
+        }
+        repo.catFile(argv[2], argv[3]);
+    }
     else
     {
         cout<<"Unknown command\n";

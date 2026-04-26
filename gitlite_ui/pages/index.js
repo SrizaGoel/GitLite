@@ -1,4 +1,8 @@
 import { useState, useEffect, useRef } from "react";
+import DiffVisualizer from "../components/DiffVisualizer";
+import HashVisualizer from "../components/HashVisualizer";
+import ObjectStoreVisualizer from "../components/ObjectStoreVisualizer";
+import DeltaChainVisualizer from "../components/DeltaChainVisualizer";
 
 export default function Home() {
   const [viewMode, setViewMode] = useState("start"); // 'start' or 'editor'
@@ -9,12 +13,20 @@ export default function Home() {
   const [logs, setLogs] = useState([{ type: 'info', text: 'System ready. Connected to local GitLite engine.' }]);
   const [isGraphModalOpen, setIsGraphModalOpen] = useState(false);
   const [isDiffModalOpen, setIsDiffModalOpen] = useState(false);
+  const [isHashModalOpen,        setIsHashModalOpen]        = useState(false);
+  const [isObjectStoreModalOpen, setIsObjectStoreModalOpen] = useState(false);
+  const [isDeltaChainModalOpen,  setIsDeltaChainModalOpen]  = useState(false);
+  const [hashCommitData,         setHashCommitData]         = useState(null);
   const [graphData, setGraphData] = useState([]);
   const [currentBranch, setCurrentBranch] = useState("main");
   
   const [diffParams, setDiffParams] = useState({ commitID: "" });
   const [diffLines, setDiffLines] = useState([]);
   const [copyFeedback, setCopyFeedback] = useState(false);
+
+  const [isVisualizing, setIsVisualizing] = useState(false);
+  const [visualizeOldContent, setVisualizeOldContent] = useState("");
+  const [visualizeNewContent, setVisualizeNewContent] = useState("");
 
   const consoleEndRef = useRef(null);
 
@@ -139,8 +151,32 @@ export default function Home() {
     addLog("Saving workspace...", 'info');
     await autoSave();
     await fetch(`http://localhost:5000/add?file=${currentFile}`);
+    
+    // Grab last commit ID for parent
+    let parentId = '0000000000000000000000000000000000000000';
+    try {
+      const graphRes = await fetch("http://localhost:5000/commit-graph");
+      const graph = await graphRes.json();
+      const branchRes = await fetch("http://localhost:5000/current-branch");
+      const branch = await branchRes.text();
+      parentId = graph.find(n => n.branches.includes(branch.trim()))?.id || parentId;
+    } catch(e) {}
+
+    const ts = new Date().toISOString().slice(0,19).replace('T',' ');
+    const commitData = {
+      message: msg,
+      parent: parentId,
+      timestamp: ts,
+      fileName: currentFile,
+      fileContent: fileContent,
+    };
+
     await runCommand("commit", { message: msg });
-    fetchRepoFiles(); 
+    fetchRepoFiles();
+
+    // Open hash visualizer with real commit data
+    setHashCommitData(commitData);
+    setIsHashModalOpen(true);
   };
 
   const handleStatus = async () => {
@@ -308,6 +344,24 @@ export default function Home() {
             <button style={mainCommitBtn} onClick={handleCommit}>
               COMMIT VERSION
             </button>
+            <button style={{...mainCommitBtn, marginTop: '10px', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)', boxShadow: '0 0 15px rgba(16, 185, 129, 0.1)'}} onClick={() => setIsHashModalOpen(true)}>
+              VISUALIZE HASHES
+            </button>
+            <button style={{...mainCommitBtn, marginTop: '10px', background: 'rgba(88, 166, 255, 0.1)', color: '#58a6ff', border: '1px solid rgba(88, 166, 255, 0.3)', boxShadow: '0 0 15px rgba(88, 166, 255, 0.1)'}} onClick={async () => {
+              try {
+                const res = await fetch("http://localhost:5000/commit-graph");
+                const data = await res.json();
+                setGraphData(data);
+                setIsObjectStoreModalOpen(true);
+              } catch(err) {
+                addLog(err.message, 'error');
+              }
+            }}>
+              OBJECT STORE
+            </button>
+            <button style={{...mainCommitBtn, marginTop: '10px', background: 'rgba(240, 136, 62, 0.1)', color: '#f0883e', border: '1px solid rgba(240, 136, 62, 0.3)', boxShadow: '0 0 15px rgba(240, 136, 62, 0.1)'}} onClick={() => setIsDeltaChainModalOpen(true)}>
+              DELTA CHAIN
+            </button>
           </div>
 
           <div style={footerNote}>
@@ -447,29 +501,122 @@ export default function Home() {
                    onChange={e => setDiffParams({ commitID: e.target.value })}
                  />
                  <button style={mainCommitBtn} onClick={() => runCommand("diff-commit", { commitID: diffParams.commitID, filename: currentFile })}>RUN COMPARISON</button>
+                 <button 
+                   style={{...mainCommitBtn, background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)', boxShadow: 'none'}} 
+                   onClick={async () => {
+                     if (!diffParams.commitID) {
+                       addLog("Please enter a Commit ID to visualize.", 'error');
+                       return;
+                     }
+                     try {
+                       addLog("Preparing visualization data...", 'info');
+                       const res = await fetch(`http://localhost:5000/file-content-at-commit?commitID=${diffParams.commitID}&filename=${currentFile}`);
+                       if (res.ok) {
+                         const oldContent = await res.text();
+                         setVisualizeOldContent(oldContent);
+                         setVisualizeNewContent(fileContent);
+                         setIsVisualizing(true);
+                       } else {
+                         addLog(`Error fetching base content: ${await res.text()}`, 'error');
+                       }
+                     } catch(err) {
+                       addLog(err.message, 'error');
+                     }
+                   }}
+                 >
+                   VISUALIZE
+                 </button>
                </div>
                <div style={diffViewScroll}>
                  {diffLines.length === 0 ? (
                    <div style={diffPlaceholder}>Ready for analysis. Enter a reference ID above.</div>
                  ) : (
-                   diffLines.map((line, i) => (
-                     <div key={i} style={{
-                       fontFamily: 'JetBrains Mono, monospace',
-                       fontSize: '13px',
-                       padding: '6px 16px',
-                       background: line.startsWith("+") ? 'rgba(16, 185, 129, 0.08)' : line.startsWith("-") ? 'rgba(239, 68, 68, 0.08)' : 'transparent',
-                       color: line.startsWith("+") ? '#10b981' : line.startsWith("-") ? '#f87171' : '#94a3b8',
-                       borderLeft: line.startsWith("+") ? '4px solid #10b981' : line.startsWith("-") ? '4px solid #ef4444' : '4px solid transparent',
-                       marginBottom: '2px'
-                     }}>
-                       {line}
-                     </div>
-                   ))
+                   (() => {
+                      let oLine = 1;
+                      let nLine = 1;
+                      return diffLines.map((line, i) => {
+                         if (line.startsWith("@@")) {
+                            const match = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+                            if (match) {
+                               oLine = parseInt(match[1], 10);
+                               nLine = parseInt(match[2], 10);
+                            }
+                            return <div key={i} style={{ color: '#8b949e', padding: '6px 16px', background: 'rgba(56, 139, 253, 0.15)', fontFamily: 'JetBrains Mono, monospace', fontSize: '12px' }}>{line}</div>;
+                         }
+                         if (line.startsWith("---") || line.startsWith("+++")) {
+                            return <div key={i} style={{ color: '#8b949e', padding: '6px 16px', fontWeight: 'bold', borderBottom: '1px solid #30363d', background: '#010409', fontFamily: 'JetBrains Mono, monospace', fontSize: '12px' }}>{line}</div>;
+                         }
+
+                         let currO = "";
+                         let currN = "";
+                         if (line.startsWith("+")) {
+                            currN = nLine++;
+                         } else if (line.startsWith("-")) {
+                            currO = oLine++;
+                         } else {
+                            currO = oLine++;
+                            currN = nLine++;
+                         }
+                         
+                         return (
+                           <div key={i} style={{
+                             display: 'flex',
+                             fontFamily: 'JetBrains Mono, monospace',
+                             fontSize: '12px',
+                             background: line.startsWith("+") ? '#163321' : line.startsWith("-") ? '#3d1619' : 'transparent',
+                             color: line.startsWith("+") ? '#46f882' : line.startsWith("-") ? '#ff7b72' : '#c9d1d9',
+                             borderLeft: line.startsWith("+") ? '3px solid #2ea043' : line.startsWith("-") ? '3px solid #da3633' : '3px solid transparent',
+                             width: '100%',
+                             boxSizing: 'border-box'
+                           }}>
+                             <div style={{ width: '45px', flexShrink: 0, padding: '2px 8px', textAlign: 'right', color: '#6e7681', userSelect: 'none', background: line.startsWith("+") ? '#1e3d29' : line.startsWith("-") ? '#4c1e20' : 'rgba(255,255,255,0.02)' }}>
+                               {currO}
+                             </div>
+                             <div style={{ width: '45px', flexShrink: 0, padding: '2px 8px', textAlign: 'right', color: '#6e7681', userSelect: 'none', background: line.startsWith("+") ? '#1e3d29' : line.startsWith("-") ? '#4c1e20' : 'rgba(255,255,255,0.02)', borderRight: '1px solid #30363d' }}>
+                               {currN}
+                             </div>
+                             <div style={{ padding: '2px 16px', whiteSpace: 'pre', width: '100%' }}>
+                               <span style={{ display: 'inline-block', width: '20px', userSelect: 'none' }}>{line.startsWith("+") ? '+' : line.startsWith("-") ? '-' : ' '}</span>
+                               {line.startsWith("+") || line.startsWith("-") ? line.substring(1) : line}
+                             </div>
+                           </div>
+                         );
+                      });
+                   })()
                  )}
                </div>
              </div>
           </div>
         </div>
+      )}
+      {isVisualizing && (
+        <DiffVisualizer 
+          oldContent={visualizeOldContent} 
+          newContent={visualizeNewContent} 
+          onClose={() => setIsVisualizing(false)} 
+        />
+      )}
+      {isHashModalOpen && (
+        <HashVisualizer 
+          commitData={hashCommitData}
+          fileContent={fileContent} 
+          fileName={currentFile}
+          onClose={() => { setIsHashModalOpen(false); setHashCommitData(null); }} 
+        />
+      )}
+      {isObjectStoreModalOpen && (
+        <ObjectStoreVisualizer
+          commits={graphData}
+          fileName={currentFile}
+          onClose={() => setIsObjectStoreModalOpen(false)}
+        />
+      )}
+      {isDeltaChainModalOpen && (
+        <DeltaChainVisualizer
+          fileContent={fileContent}
+          fileName={currentFile}
+          onClose={() => setIsDeltaChainModalOpen(false)}
+        />
       )}
     </div>
   );

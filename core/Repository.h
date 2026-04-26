@@ -52,6 +52,7 @@ public:
     void gc();
     void graph();
     void branches(); 
+    void catFile(const string &commitID, const string &filename);
 };
 
 #endif
